@@ -10,7 +10,7 @@ networks:
 services:
 
   ca_org1:
-    image: hyperledger/fabric-ca:latest
+    image: ${FABRIC_DOCKER_NS:-hyperledger}/fabric-ca:${FABRIC_IMAGE_TAG:-latest}
     labels:
       service: hyperledger-fabric
     environment:
@@ -30,7 +30,7 @@ services:
       - test
 
   ca_org2:
-    image: hyperledger/fabric-ca:latest
+    image: ${FABRIC_DOCKER_NS:-hyperledger}/fabric-ca:${FABRIC_IMAGE_TAG:-latest}
     labels:
       service: hyperledger-fabric
     environment:
@@ -50,7 +50,7 @@ services:
       - test
 
   ca_orderer:
-    image: hyperledger/fabric-ca:latest
+    image: ${FABRIC_DOCKER_NS:-hyperledger}/fabric-ca:${FABRIC_IMAGE_TAG:-latest}
     labels:
       service: hyperledger-fabric
     environment:

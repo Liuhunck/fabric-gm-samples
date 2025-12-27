@@ -9,8 +9,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +23,7 @@ import (
 	"github.com/hyperledger/fabric-gateway/pkg/client"
 	"github.com/hyperledger/fabric-gateway/pkg/hash"
 	"github.com/hyperledger/fabric-gateway/pkg/identity"
+	gmsmx509 "github.com/tjfoc/gmsm/x509"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
@@ -44,13 +48,13 @@ func main() {
 	defer clientConnection.Close()
 
 	id := newIdentity()
-	sign := newSign()
+	sign, messageHash := newSign()
 
 	// Create a Gateway connection for a specific client identity
 	gw, err := client.Connect(
 		id,
 		client.WithSign(sign),
-		client.WithHash(hash.SHA256),
+		client.WithHash(messageHash),
 		client.WithClientConnection(clientConnection),
 		// Default timeouts for different gRPC calls
 		client.WithEvaluateTimeout(5*time.Second),
@@ -85,6 +89,19 @@ func main() {
 	exampleErrorHandling(contract)
 }
 
+type pemIdentity struct {
+	mspID       string
+	credentials []byte
+}
+
+func (id *pemIdentity) MspID() string {
+	return id.mspID
+}
+
+func (id *pemIdentity) Credentials() []byte {
+	return id.credentials
+}
+
 // newGrpcConnection creates a gRPC connection to the Gateway server.
 func newGrpcConnection() *grpc.ClientConn {
 	certificatePEM, err := os.ReadFile(tlsCertPath)
@@ -109,44 +126,56 @@ func newGrpcConnection() *grpc.ClientConn {
 	return connection
 }
 
-// newIdentity creates a client identity for this Gateway connection using an X.509 certificate.
-func newIdentity() *identity.X509Identity {
+// newIdentity creates a client identity for this Gateway connection.
+//
+// Note: SM2 certificates can't be parsed by the standard library crypto/x509, so we avoid
+// parsing and provide the PEM-encoded certificate directly.
+func newIdentity() identity.Identity {
 	certificatePEM, err := readFirstFile(certPath)
 	if err != nil {
 		panic(fmt.Errorf("failed to read certificate file: %w", err))
 	}
 
-	certificate, err := identity.CertificateFromPEM(certificatePEM)
-	if err != nil {
-		panic(err)
+	return &pemIdentity{
+		mspID:       mspID,
+		credentials: certificatePEM,
 	}
-
-	id, err := identity.NewX509Identity(mspID, certificate)
-	if err != nil {
-		panic(err)
-	}
-
-	return id
 }
 
-// newSign creates a function that generates a digital signature from a message digest using a private key.
-func newSign() identity.Sign {
+// newSign creates a function that generates a digital signature from a message digest.
+//
+// For ECDSA, the Gateway hashes messages with SHA256 and signs the digest.
+// For SM2, the Gateway must not pre-hash; instead we sign the full message and use hash.NONE.
+func newSign() (identity.Sign, hash.Hash) {
 	privateKeyPEM, err := readFirstFile(keyPath)
 	if err != nil {
 		panic(fmt.Errorf("failed to read private key file: %w", err))
 	}
 
-	privateKey, err := identity.PrivateKeyFromPEM(privateKeyPEM)
+	// ECDSA / Ed25519 path (supported by fabric-gateway identity helpers)
+	if privateKey, parseErr := identity.PrivateKeyFromPEM(privateKeyPEM); parseErr == nil {
+		sign, err := identity.NewPrivateKeySign(privateKey)
+		if err != nil {
+			panic(err)
+		}
+		return sign, hash.SHA256
+	}
+
+	// SM2 path
+	block, _ := pem.Decode(privateKeyPEM)
+	if block == nil {
+		panic(errors.New("failed to decode private key PEM"))
+	}
+
+	sm2Key, err := gmsmx509.ParsePKCS8PrivateKey(block.Bytes, nil)
 	if err != nil {
 		panic(err)
 	}
 
-	sign, err := identity.NewPrivateKeySign(privateKey)
-	if err != nil {
-		panic(err)
-	}
-
-	return sign
+	var signer crypto.Signer = sm2Key
+	return func(message []byte) ([]byte, error) {
+		return signer.Sign(rand.Reader, message, nil)
+	}, hash.NONE
 }
 
 func readFirstFile(dirPath string) ([]byte, error) {

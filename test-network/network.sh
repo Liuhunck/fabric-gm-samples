@@ -28,6 +28,11 @@ trap "popd > /dev/null" EXIT
 
 . scripts/utils.sh
 
+# Allow overriding the docker image namespace/tag used by this network.
+# Defaults keep existing behavior (hyperledger/*:latest).
+: ${FABRIC_DOCKER_NS:="hyperledger"}
+: ${FABRIC_IMAGE_TAG:="latest"}
+
 : ${CONTAINER_CLI:="docker"}
 if command -v ${CONTAINER_CLI}-compose > /dev/null 2>&1; then
     : ${CONTAINER_CLI_COMPOSE:="${CONTAINER_CLI}-compose"}
@@ -73,7 +78,7 @@ function checkPrereqs() {
   # use the fabric peer container to see if the samples and binaries match your
   # docker images
   LOCAL_VERSION=$(peer version | sed -ne 's/^ Version: //p')
-  DOCKER_IMAGE_VERSION=$(${CONTAINER_CLI} run --rm hyperledger/fabric-peer:latest peer version | sed -ne 's/^ Version: //p')
+  DOCKER_IMAGE_VERSION=$(${CONTAINER_CLI} run --rm ${FABRIC_DOCKER_NS}/fabric-peer:${FABRIC_IMAGE_TAG} peer version | sed -ne 's/^ Version: //p')
 
   infoln "LOCAL_VERSION=$LOCAL_VERSION"
   infoln "DOCKER_IMAGE_VERSION=$DOCKER_IMAGE_VERSION"
@@ -119,7 +124,7 @@ function checkPrereqs() {
       exit 1
     fi
     CA_LOCAL_VERSION=$(fabric-ca-client version | sed -ne 's/ Version: //p')
-    CA_DOCKER_IMAGE_VERSION=$(${CONTAINER_CLI} run --rm hyperledger/fabric-ca:latest fabric-ca-client version | sed -ne 's/ Version: //p' | head -1)
+    CA_DOCKER_IMAGE_VERSION=$(${CONTAINER_CLI} run --rm ${FABRIC_DOCKER_NS}/fabric-ca:${FABRIC_IMAGE_TAG} fabric-ca-client version | sed -ne 's/ Version: //p' | head -1)
     infoln "CA_LOCAL_VERSION=$CA_LOCAL_VERSION"
     infoln "CA_DOCKER_IMAGE_VERSION=$CA_DOCKER_IMAGE_VERSION"
 
@@ -161,16 +166,23 @@ function createOrgs() {
 
   # Create crypto material using cryptogen
   if [ "$CRYPTO" == "cryptogen" ]; then
-    which cryptogen
+    CRYPTOGEN_CMD=${CRYPTOGEN_CMD:-cryptogen}
+    CRYPTOGEN_GM=${CRYPTOGEN_GM:-true}
+    CRYPTOGEN_ARGS=()
+    if [ "$CRYPTOGEN_GM" == "true" ]; then
+      CRYPTOGEN_ARGS+=(--gm)
+    fi
+
+    command -v "$CRYPTOGEN_CMD" >/dev/null 2>&1
     if [ "$?" -ne 0 ]; then
-      fatalln "cryptogen tool not found. exiting"
+      fatalln "cryptogen tool not found (CRYPTOGEN_CMD=$CRYPTOGEN_CMD). exiting"
     fi
     infoln "Generating certificates using cryptogen tool"
 
     infoln "Creating Org1 Identities"
 
     set -x
-    cryptogen generate --config=./organizations/cryptogen/crypto-config-org1.yaml --output="organizations"
+    "$CRYPTOGEN_CMD" generate "${CRYPTOGEN_ARGS[@]}" --config=./organizations/cryptogen/crypto-config-org1.yaml --output="organizations"
     res=$?
     { set +x; } 2>/dev/null
     if [ $res -ne 0 ]; then
@@ -180,7 +192,7 @@ function createOrgs() {
     infoln "Creating Org2 Identities"
 
     set -x
-    cryptogen generate --config=./organizations/cryptogen/crypto-config-org2.yaml --output="organizations"
+    "$CRYPTOGEN_CMD" generate "${CRYPTOGEN_ARGS[@]}" --config=./organizations/cryptogen/crypto-config-org2.yaml --output="organizations"
     res=$?
     { set +x; } 2>/dev/null
     if [ $res -ne 0 ]; then
@@ -190,7 +202,7 @@ function createOrgs() {
     infoln "Creating Orderer Org Identities"
 
     set -x
-    cryptogen generate --config=./organizations/cryptogen/crypto-config-orderer.yaml --output="organizations"
+    "$CRYPTOGEN_CMD" generate "${CRYPTOGEN_ARGS[@]}" --config=./organizations/cryptogen/crypto-config-orderer.yaml --output="organizations"
     res=$?
     { set +x; } 2>/dev/null
     if [ $res -ne 0 ]; then

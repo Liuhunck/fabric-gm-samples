@@ -63,16 +63,23 @@ function printHelp () {
 function generateOrg3() {
   # Create crypto material using cryptogen
   if [ "$CRYPTO" == "cryptogen" ]; then
-    which cryptogen
+    CRYPTOGEN_CMD=${CRYPTOGEN_CMD:-cryptogen}
+    CRYPTOGEN_GM=${CRYPTOGEN_GM:-true}
+    CRYPTOGEN_ARGS=()
+    if [ "$CRYPTOGEN_GM" == "true" ]; then
+      CRYPTOGEN_ARGS+=(--gm)
+    fi
+
+    command -v "$CRYPTOGEN_CMD" >/dev/null 2>&1
     if [ "$?" -ne 0 ]; then
-      fatalln "cryptogen tool not found. exiting"
+      fatalln "cryptogen tool not found (CRYPTOGEN_CMD=$CRYPTOGEN_CMD). exiting"
     fi
     infoln "Generating certificates using cryptogen tool"
 
     infoln "Creating Org3 Identities"
 
     set -x
-    cryptogen generate --config=org3-crypto.yaml --output="../organizations"
+    "$CRYPTOGEN_CMD" generate "${CRYPTOGEN_ARGS[@]}" --config=org3-crypto.yaml --output="../organizations"
     res=$?
     { set +x; } 2>/dev/null
     if [ $res -ne 0 ]; then
