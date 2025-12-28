@@ -322,7 +322,7 @@ csr:
 bccsp:
     default: SW
     sw:
-        hash: SHA2
+        hash: SM3
         security: 256
         filekeystore:
             # The directory used for the software file-based keystore
